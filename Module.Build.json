@@ -1,0 +1,26 @@
+{
+	"Resources": {
+	  "NoComponents": true,
+      "CoreServicesDlls": [
+        "./Decisions.Zitac.AWS/bin/Decisions.Zitac.AWS.dll"
+      ],
+      "CustomImages": [
+        "modules_logo_aws.svg"
+    ],
+      "CliDlls": null,
+      "WebPages": null,
+      "SilverlightDlls": null,
+      "AgentDlls": null,
+      "InstallScript": null,
+      "SqlScripts": null,
+      "ObjectsToImport": null,
+      "MsSqlScript": null
+    },
+    "Version": "9.6.0",
+    "ImagePath": "modules_logo_aws.svg",
+    "Dependencies": [{
+        "ModuleName": "Decisions.AWS.zip",
+        "AutoInstall": true
+      }],
+    "Description": "Custom steps made by Zitac Consulting to use AWS resources"
+}

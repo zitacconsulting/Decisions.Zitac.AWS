@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="Amazon.EC2">
+			<HintPath>..\AWSSDK.EC2.dll</HintPath>
+		</Reference>
+		<Reference Include="Amazon.SecurityToken">
+			<HintPath>..\AWSSDK.SecurityToken.dll</HintPath>
+		</Reference>
+		<Reference Include="Amazon">
+			<HintPath>..\AWSSDK.Core.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+	<ItemGroup>
+	  <PackageReference Include="DecisionsSDK" Version="9.5.0" />
+	</ItemGroup>
+</Project>
