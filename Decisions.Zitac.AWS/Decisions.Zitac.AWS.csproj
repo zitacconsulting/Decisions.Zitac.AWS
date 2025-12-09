@@ -14,6 +14,9 @@
 		<Reference Include="Amazon">
 			<HintPath>..\AWSSDK.Core.dll</HintPath>
 		</Reference>
+		<Reference Include="Amazon.S3">
+			<HintPath>..\AWSSDK.S3.dll</HintPath>
+		</Reference>
 	</ItemGroup>
 	<ItemGroup>
 	  <PackageReference Include="DecisionsSDK" Version="9.5.0" />
