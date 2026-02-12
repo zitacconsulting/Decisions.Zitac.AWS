@@ -1,0 +1,126 @@
+using System.ComponentModel;
+using System.Security.Cryptography;
+using System.Text;
+using DecisionsFramework.Design.Flow;
+using DecisionsFramework.Design.Properties;
+using DecisionsFramework.Design.ConfigurationStorage.Attributes;
+using DecisionsFramework.Design.Flow.Mapping;
+using DecisionsFramework.Design.Flow.CoreSteps;
+
+namespace Decisions.Zitac.AWS.Steps
+{
+    [AutoRegisterStep("Generate SES SMTP Password", "Integration", "AWS", "Zitac")]
+    [Writable]
+    public class GenerateSesSmtpPassword : BaseFlowAwareStep, ISyncStep, IDataConsumer, IDataProducer, INotifyPropertyChanged
+    {
+        [WritableValue]
+        private string region;
+
+        [PropertyClassification(1, "AWS Region", "AWS Settings")]
+        [SelectStringEditor("RegionOptions")]
+        public string Region
+        {
+            get { return region; }
+            set
+            {
+                region = value;
+                OnPropertyChanged();
+            }
+        }
+
+        [PropertyHidden]
+        public string[] RegionOptions
+        {
+            get
+            {
+                return new string[]
+                {
+                    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+                    "eu-west-1", "eu-west-2", "eu-central-1",
+                    "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
+                    "sa-east-1"
+                };
+            }
+        }
+
+        public DataDescription[] InputData
+        {
+            get
+            {
+                return new DataDescription[]
+                {
+                    new DataDescription(typeof(string), "Secret Access Key") { Categories = new string[] { "Credentials" } }
+                };
+            }
+        }
+
+        public override OutcomeScenarioData[] OutcomeScenarios
+        {
+            get
+            {
+                return new OutcomeScenarioData[]
+                {
+                    new OutcomeScenarioData("Done", new DataDescription(typeof(string), "SMTP Password")),
+                    new OutcomeScenarioData("Error", new DataDescription(typeof(string), "Error Message"))
+                };
+            }
+        }
+
+        public ResultData Run(StepStartData data)
+        {
+            try
+            {
+                var secretAccessKey = data.Data["Secret Access Key"] as string;
+
+                if (string.IsNullOrEmpty(secretAccessKey))
+                    throw new ArgumentException("Secret Access Key is required");
+
+                if (string.IsNullOrEmpty(region))
+                    throw new ArgumentException("AWS Region must be selected");
+
+                var smtpPassword = DeriveSmtpPassword(secretAccessKey, region);
+
+                return new ResultData("Done", new Dictionary<string, object>
+                {
+                    { "SMTP Password", smtpPassword }
+                });
+            }
+            catch (Exception ex)
+            {
+                return new ResultData("Error", new Dictionary<string, object>
+                {
+                    { "Error Message", ex.Message }
+                });
+            }
+        }
+
+        private static string DeriveSmtpPassword(string secretAccessKey, string region)
+        {
+            // AWS SES SMTP password derivation algorithm
+            // https://docs.aws.amazon.com/ses/latest/dg/smtp-credentials.html
+            byte version = 0x04;
+            string message = "SendRawEmail";
+
+            var kDate = HmacSha256(Encoding.UTF8.GetBytes("AWS4" + secretAccessKey), "11111111");
+            var kRegion = HmacSha256(kDate, region);
+            var kService = HmacSha256(kRegion, "ses");
+            var kTerminal = HmacSha256(kService, "aws4_request");
+            var kMessage = HmacSha256(kTerminal, message);
+
+            // Prepend version byte to the signature
+            var signatureAndVersion = new byte[1 + kMessage.Length];
+            signatureAndVersion[0] = version;
+            Array.Copy(kMessage, 0, signatureAndVersion, 1, kMessage.Length);
+
+            return Convert.ToBase64String(signatureAndVersion);
+        }
+
+        private static byte[] HmacSha256(byte[] key, string data)
+        {
+            using (var hmac = new HMACSHA256(key))
+            {
+                return hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
+            }
+        }
+    }
+}
