@@ -16,11 +16,11 @@
       "ObjectsToImport": null,
       "MsSqlScript": null
     },
-    "Version": "9.17.0",
+    "Version": "2.0.0",
     "ImagePath": "modules_logo_aws.svg",
     "Dependencies": [{
         "ModuleName": "Decisions.AWS.zip",
         "AutoInstall": true
       }],
-    "Description": "Custom steps made by Zitac Consulting to use AWS resources"
+    "Description": "Custom steps, shared AWS connection settings (system-wide and per project, incl. Assume Role) and a CloudWatch logging sink made by Zitac Consulting"
 }

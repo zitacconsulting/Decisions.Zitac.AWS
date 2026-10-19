@@ -1,24 +1,50 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFramework>net8.0</TargetFramework>
+		<!-- Every Decisions version from 9.26 onward runs on .NET 10. -->
+		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
+		<Nullable>disable</Nullable>
 	</PropertyGroup>
 	<ItemGroup>
-		<Reference Include="Amazon.EC2">
-			<HintPath>..\AWSSDK.EC2.dll</HintPath>
+		<!-- Compile-only references (Private=false, never packaged). All of these already ship
+		     with Decisions: AWSSDK.Core/Serilog/Serilog.Sinks.PeriodicBatching/Decisions.Logging in
+		     core bin/, AWSSDK.S3/SecurityToken in the built-in Decisions.AWS module's ReferenceDlls
+		     (which Module.Build.json depends on). AWSSDK.CloudWatchLogs is deliberately NOT used:
+		     the 3.7 copy Decisions.AWS ships can't load against core's AWSSDK.Core 4.x.
+		     The copies in lib/ are taken from 9.26.0.75786 so they match the shipped versions. -->
+		<Reference Include="AWSSDK.Core">
+			<HintPath>..\lib\AWSSDK.Core.dll</HintPath>
+			<Private>false</Private>
 		</Reference>
-		<Reference Include="Amazon.SecurityToken">
-			<HintPath>..\AWSSDK.SecurityToken.dll</HintPath>
+		<Reference Include="AWSSDK.S3">
+			<HintPath>..\lib\AWSSDK.S3.dll</HintPath>
+			<Private>false</Private>
 		</Reference>
-		<Reference Include="Amazon">
-			<HintPath>..\AWSSDK.Core.dll</HintPath>
+		<Reference Include="AWSSDK.SecurityToken">
+			<HintPath>..\lib\AWSSDK.SecurityToken.dll</HintPath>
+			<Private>false</Private>
 		</Reference>
-		<Reference Include="Amazon.S3">
-			<HintPath>..\AWSSDK.S3.dll</HintPath>
+		<Reference Include="Serilog">
+			<HintPath>..\lib\Serilog.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Serilog.Sinks.PeriodicBatching">
+			<HintPath>..\lib\Serilog.Sinks.PeriodicBatching.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Decisions.Logging">
+			<HintPath>..\lib\Decisions.Logging.dll</HintPath>
+			<Private>false</Private>
 		</Reference>
 	</ItemGroup>
 	<ItemGroup>
-	  <PackageReference Include="DecisionsSDK" Version="9.5.0" />
+		<!-- Decisions itself runs on ASP.NET Core, so this shared framework is always loaded at runtime
+		     (used for FileExtensionContentTypeProvider). Nothing extra is packaged. -->
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="DecisionsSDK" Version="9.25.0">
+			<ExcludeAssets>runtime</ExcludeAssets>
+		</PackageReference>
 	</ItemGroup>
 </Project>

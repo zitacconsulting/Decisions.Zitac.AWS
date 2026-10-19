@@ -1,15 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project
     xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0" DefaultTargets="build_all">
-    
+
     <Target Name="build_all">
         <Exec Command="dotnet publish ./Decisions.Zitac.AWS/Decisions.Zitac.AWS.csproj --runtime linux-x64 --self-contained false --output ./Decisions.Zitac.AWS/bin -c Debug" />
         <Exec Command="dotnet tool update --global CreateDecisionsModule-GlobalTool" />
         <CallTarget Targets="build_module"/>
     </Target>
-    
+
     <Target Name="build_module">
-        <Exec Command="CreateDecisionsModule -buildmodule Decisions.Zitac.AWS -output &quot;.&quot; -buildfile Module.Build.json"/>
+        <!-- CreateDecisionsModule truncates ModuleName to everything before the LAST "." of
+             -buildmodule's argument ("Decisions.Zitac.AWS" would become "Decisions.Zitac").
+             The throwaway ".Module" suffix makes ModuleName the intended "Decisions.Zitac.AWS",
+             which must match ZitacAWSSettings.MODULE_NAME. -->
+        <Exec Command="CreateDecisionsModule -buildmodule Decisions.Zitac.AWS.Module -output &quot;.&quot; -buildfile Module.Build.json"/>
+        <Move SourceFiles="Decisions.Zitac.AWS.Module.zip" DestinationFiles="Decisions.Zitac.AWS.zip" />
     </Target>
 
 </Project>

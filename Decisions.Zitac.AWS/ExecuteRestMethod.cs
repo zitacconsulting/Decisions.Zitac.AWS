@@ -1,20 +1,16 @@
-﻿using System.ComponentModel;
-using System.Security.Cryptography;
-using System.Text;
-using Amazon.Runtime;
-using DecisionsFramework.Design.Flow;
-using DecisionsFramework.Design.Properties;
+﻿using Amazon.Runtime;
+using Decisions.Zitac.AWS.Authentication;
+using DecisionsFramework;
+using DecisionsFramework.Data.DataTypes;
 using DecisionsFramework.Design.ConfigurationStorage.Attributes;
+using DecisionsFramework.Design.Flow;
 using DecisionsFramework.Design.Flow.Mapping;
-using DecisionsFramework.Design.Flow.CoreSteps;
+using DecisionsFramework.Design.Flow.Mapping.InputImpl;
+using DecisionsFramework.Design.Properties;
+using DecisionsFramework.Design.Properties.Attributes;
 
 namespace Decisions.Zitac.AWS.Steps
 {
-    public enum AuthenticationMethod
-    {
-        AccessKeys,
-        AWSDefaultCredentials
-    }
     public enum HttpMethod
     {
         GET,
@@ -26,259 +22,135 @@ namespace Decisions.Zitac.AWS.Steps
 
     [AutoRegisterStep("Execute AWS Rest Method", "Integration", "AWS", "Zitac")]
     [Writable]
-    public class ExecuteRestMethod : BaseFlowAwareStep, ISyncStep, IDataConsumer, IDataProducer, INotifyPropertyChanged
+    public class ExecuteRestMethod : BaseAwsStep, IDefaultInputMappingStep
     {
-        [WritableValue]
-        private AuthenticationMethod authenticationMethod;
+        private const string REQUEST_CATEGORY = "Request";
+        private const string INPUT_SERVICE = "AWS Service Name";
+        private const string INPUT_PATH = "API Endpoint Path";
+        private const string INPUT_METHOD = "HTTP Method";
+        private const string INPUT_BODY = "Request Body";
+        private const string INPUT_HEADERS = "Headers";
+        private const string DEFAULT_CONTENT_TYPE = "application/json";
+        private const int DEFAULT_TIMEOUT_SECONDS = 100;
 
-        [PropertyClassification(1, "Authentication Method", new string[] { "AWS Settings" })]
-        public AuthenticationMethod AuthenticationMethod
-        {
-            get { return authenticationMethod; }
-            set
-            {
-                authenticationMethod = value;
-                this.OnPropertyChanged(nameof(AuthenticationMethod));
-                this.OnPropertyChanged("InputData");
-            }
-        }
-
+        // Timeout is enforced per request with a CancellationToken so one shared client can serve all steps.
+        private static readonly HttpClient httpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 
         [WritableValue]
-        private string region;
+        private string endpointUrl;
 
-        [PropertyClassification(2, "AWS Region", "AWS Settings")]
-        [SelectStringEditor("RegionOptions")]
-        public string Region
+        [WritableValue]
+        private string contentType = DEFAULT_CONTENT_TYPE;
+
+        [WritableValue]
+        private int timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+
+        [PropertyClassification(new[] { INPUTS_CATEGORY }, "Request Info", 0)]
+        [InfoOrWarningEditor(false, "https://docs.aws.amazon.com/general/latest/gr/aws-service-information.html", true)]
+        public string InputsNote
         {
-            get { return region; }
-            set
-            {
-                region = value;
-                OnPropertyChanged();
-            }
+            get { return "Service: e.g. sts or dynamodb. Path: e.g. /?Action=GetCallerIdentity&Version=2011-06-15. Body and Headers are optional."; }
+            set { }
         }
 
-        [PropertyHidden]
-        public string[] RegionOptions
+        [PropertyClassification(9, "Endpoint Info", REQUEST_CATEGORY)]
+        [InfoOrWarningEditor(false, null, true)]
+        public string EndpointNote
         {
-            get
-            {
-                return new string[]
-                {
-                    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-                    "eu-west-1", "eu-west-2", "eu-central-1",
-                    "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
-                    "sa-east-1"
-                };
-            }
+            get { return "Endpoint URL Override is optional: empty calls https://[service].[region].amazonaws.com."; }
+            set { }
         }
 
-        public DataDescription[] InputData
+        [PropertyClassification(10, "Endpoint URL Override (optional)", REQUEST_CATEGORY)]
+        public string EndpointUrl
         {
-            get
-            {
-                var inputs = new List<DataDescription>();
-
-                if (AuthenticationMethod == AuthenticationMethod.AccessKeys)
-                {
-                    inputs.Add(new DataDescription(typeof(string), "Access Key ID"){ Categories = new string[] { "Credentials" } });
-                    inputs.Add(new DataDescription(typeof(string), "Secret Access Key"){ Categories = new string[] { "Credentials" } });
-                }
-
-                inputs.Add(new DataDescription(typeof(string), "AWS Service Name"));
-                inputs.Add(new DataDescription(typeof(string), "API Endpoint Path"));
-                inputs.Add(new DataDescription(typeof(HttpMethod), "HTTP Method"));
-                inputs.Add(new DataDescription(typeof(string), "Request Body (JSON)"));
-
-                return inputs.ToArray();
-            }
+            get { return endpointUrl; }
+            set { endpointUrl = value; OnPropertyChanged(nameof(EndpointUrl)); }
         }
 
-        public override OutcomeScenarioData[] OutcomeScenarios
+        [PropertyClassification(11, "Content Type", REQUEST_CATEGORY)]
+        public string ContentType
         {
-            get
-            {
-                return new OutcomeScenarioData[]
-                {
-                    new OutcomeScenarioData("Done", new DataDescription(typeof(string), "Response Content")),
-                    new OutcomeScenarioData("Error", new DataDescription(typeof(string), "Error Message"))
-                };
-            }
+            get { return contentType; }
+            set { contentType = value; OnPropertyChanged(nameof(ContentType)); }
         }
 
-        public ResultData Run(StepStartData data)
+        [PropertyClassification(12, "Timeout (seconds)", REQUEST_CATEGORY)]
+        public int TimeoutSeconds
         {
-            try
-            {
-                string accessKey, secretKey, service, requestUri, requestPayload;
-                HttpMethod httpMethod;
-                AWSCredentials credentials;
-
-                if (AuthenticationMethod == AuthenticationMethod.AccessKeys)
-                {
-                    accessKey = data.Data["Access Key ID"] as string;
-                    secretKey = data.Data["Secret Access Key"] as string;
-                    credentials = new BasicAWSCredentials(accessKey, secretKey);
-                }
-                else
-                {
-                    credentials = FallbackCredentialsFactory.GetCredentials();
-                }
-
-
-                service = data.Data["AWS Service Name"] as string;
-                requestUri = data.Data["API Endpoint Path"] as string;
-                httpMethod = (HttpMethod)data.Data["HTTP Method"];
-                requestPayload = data.Data["Request Body (JSON)"] as string;
-
-                var response = ExecuteAWSRequest(credentials, region, service, requestUri, httpMethod, requestPayload).Result;
-                
-
-                return new ResultData("Done", new Dictionary<string, object>
-                {
-                    { "Response Content", response }
-                });
-            }
-            catch (Exception ex)
-            {
-                return new ResultData("Error", new Dictionary<string, object>
-                {
-                    { "Error Message", ex.Message }
-                });
-            }
+            get { return timeoutSeconds; }
+            set { timeoutSeconds = value; OnPropertyChanged(nameof(TimeoutSeconds)); }
         }
 
-
-
-private async Task<string> ExecuteAWSRequest(AWSCredentials credentials, string region, string service, string requestUri, HttpMethod httpMethod, string requestPayload)
-{
-
-        var endpoint = new Uri($"https://{service}.{region.ToLower()}.amazonaws.com");
-        var request = new HttpRequestMessage(new System.Net.Http.HttpMethod(httpMethod.ToString()), new Uri(endpoint, requestUri));
-
-        // Get AWS credentials - this will fetch from the container's metadata endpoint when using IAM Role
-        var awsCredentials = await credentials.GetCredentialsAsync();
-        if (awsCredentials == null)
+        protected override IEnumerable<DataDescription> StepInputs => new[]
         {
-            throw new Exception("Failed to obtain AWS credentials");
-        }
-
-        // Create a date for headers and the credential string
-        var dateTime = DateTime.UtcNow;
-        var dateStamp = dateTime.ToString("yyyyMMdd");
-        var amzDateTime = dateTime.ToString("yyyyMMddTHHmmssZ");
-
-        // Calculate payload hash
-        var payloadHash = CalculateHash(requestPayload ?? string.Empty);
-
-        // Set the request payload
-        if (!string.IsNullOrEmpty(requestPayload))
-        {
-            request.Content = new StringContent(requestPayload, Encoding.UTF8, "application/json");
-        }
-
-        // Initialize headers dictionary to maintain order
-        var headers = new SortedDictionary<string, string>
-        {
-            { "host", endpoint.Host },
-            { "x-amz-content-sha256", payloadHash },
-            { "x-amz-date", amzDateTime }
+            new DataDescription(typeof(string), INPUT_SERVICE),
+            new DataDescription(typeof(string), INPUT_PATH),
+            new DataDescription(typeof(HttpMethod), INPUT_METHOD),
+            new DataDescription(typeof(string), INPUT_BODY),
+            new DataDescription(typeof(SimpleKeyValuePair), INPUT_HEADERS, true)
         };
 
-        // Add security token for temporary credentials (IAM Role)
-        if (!string.IsNullOrEmpty(awsCredentials.Token))
+        // Optional inputs start as Ignore so a plain GET only needs service, path and method.
+        public IInputMapping[] DefaultInputs => new IInputMapping[]
         {
-            headers.Add("x-amz-security-token", awsCredentials.Token);
-        }
+            new ConstantInputMapping { InputDataName = INPUT_METHOD, Value = HttpMethod.GET },
+            new IgnoreInputMapping { InputDataName = INPUT_BODY },
+            new IgnoreInputMapping { InputDataName = INPUT_HEADERS }
+        };
 
-        // Add all headers to request
-        foreach (var header in headers)
+        protected override DataDescription[] DoneOutputs => new[]
         {
-            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        }
+            new DataDescription(typeof(string), "Response Content"),
+            new DataDescription(typeof(int), "Status Code")
+        };
 
-        // Add content-type if present
-        if (request.Content != null)
+        protected override Dictionary<string, object> RunStep(StepStartData data, AwsConnection connection)
         {
-            request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
-            headers.Add("content-type", "application/json");
-        }
+            string service = (data.Data[INPUT_SERVICE] as string)?.Trim();
+            string path = data.Data[INPUT_PATH] as string;
+            HttpMethod httpMethod = (HttpMethod)data.Data[INPUT_METHOD];
+            string body = data.Data[INPUT_BODY] as string;
+            var headers = (data.Data[INPUT_HEADERS] as IEnumerable<SimpleKeyValuePair>)?
+                .Where(h => h != null && !string.IsNullOrWhiteSpace(h.Key))
+                .Select(h => new KeyValuePair<string, string>(h.Key, h.Value))
+                .ToList();
 
-        var credentialScope = $"{dateStamp}/{region}/{service}/aws4_request";
+            if (string.IsNullOrEmpty(service))
+                throw new ArgumentException("AWS Service Name is required");
 
-        // Create canonical headers string
-        var canonicalHeaders = new StringBuilder();
-        foreach (var header in headers)
-        {
-            canonicalHeaders.AppendLine($"{header.Key}:{header.Value}");
-        }
+            Uri endpoint = string.IsNullOrWhiteSpace(EndpointUrl)
+                ? connection.GetServiceEndpoint(service)
+                : new Uri(EndpointUrl.Trim());
 
-        // Create signed headers string
-        var signedHeaders = string.Join(";", headers.Keys);
+            ImmutableCredentials credentials = connection.GetCredentials().GetCredentialsAsync().GetAwaiter().GetResult()
+                ?? throw new Exception("Failed to obtain AWS credentials");
 
-        // Create canonical request
-        var canonicalRequest = new StringBuilder();
-        canonicalRequest.AppendLine(request.Method.ToString());
-        canonicalRequest.AppendLine(request.RequestUri.AbsolutePath);
-        canonicalRequest.AppendLine(string.Empty); // Empty query string
-        canonicalRequest.Append(canonicalHeaders);
-        canonicalRequest.AppendLine();
-        canonicalRequest.AppendLine(signedHeaders);
-        canonicalRequest.Append(payloadHash);
+            using HttpRequestMessage request = AwsSigV4.CreateSignedRequest(httpMethod.ToString(), endpoint, path,
+                connection.Region, service, credentials, body, ContentType,
+                headers);
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(TimeoutSeconds));
+            using HttpResponseMessage response = httpClient.SendAsync(request, cancellation.Token).GetAwaiter().GetResult();
+            string responseContent = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
-        var canonicalRequestString = canonicalRequest.ToString();
-        var canonicalRequestHash = CalculateHash(canonicalRequestString);
-
-        // Create string to sign
-        var stringToSign = $"AWS4-HMAC-SHA256\n{amzDateTime}\n{credentialScope}\n{canonicalRequestHash}";
-
-        // Calculate signature
-        var kSecret = Encoding.UTF8.GetBytes($"AWS4{awsCredentials.SecretKey}");
-        var kDate = HmacSha256(kSecret, dateStamp);
-        var kRegion = HmacSha256(kDate, region);
-        var kService = HmacSha256(kRegion, service);
-        var kSigning = HmacSha256(kService, "aws4_request");
-        var signature = BitConverter.ToString(HmacSha256(kSigning, stringToSign)).Replace("-", "").ToLowerInvariant();
-
-        // Add authorization header
-        var authorizationHeader = $"AWS4-HMAC-SHA256 Credential={awsCredentials.AccessKey}/{credentialScope}, SignedHeaders={signedHeaders}, Signature={signature}";
-        request.Headers.TryAddWithoutValidation("Authorization", authorizationHeader);
-
-        // Execute the request
-        using (var client = new HttpClient())
-        {
-            var response = await client.SendAsync(request);
-            var responseContent = await response.Content.ReadAsStringAsync();
-            
             if (!response.IsSuccessStatusCode)
+                throw new Exception($"AWS request failed with HTTP {(int)response.StatusCode} {response.StatusCode}: {responseContent}");
+
+            return new Dictionary<string, object>
             {
-                throw new Exception($"AWS request failed with status code {response.StatusCode}: {responseContent}");
-            }
-            
-            return responseContent;
+                { "Response Content", responseContent },
+                { "Status Code", (int)response.StatusCode }
+            };
         }
-    
 
-}
-
-        private byte[] HmacSha256(byte[] key, string data)
+        public override ValidationIssue[] GetValidationIssues()
         {
-            using (var hmac = new HMACSHA256(key))
-            {
-                return hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
-            }
+            var issues = new List<ValidationIssue>(base.GetValidationIssues());
+            if (!string.IsNullOrWhiteSpace(EndpointUrl) && !Uri.TryCreate(EndpointUrl.Trim(), UriKind.Absolute, out _))
+                issues.Add(new ValidationIssue(this, "Endpoint URL Override must be an absolute URL, e.g. https://iam.amazonaws.com", "", BreakLevel.Fatal, nameof(EndpointUrl)));
+            if (TimeoutSeconds <= 0)
+                issues.Add(new ValidationIssue(this, "Timeout must be greater than 0", "", BreakLevel.Fatal, nameof(TimeoutSeconds)));
+            return issues.ToArray();
         }
-
-        private string CalculateHash(string input)
-        {
-            using (var sha256 = SHA256.Create())
-            {
-                var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(input));
-                return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
-            }
-        }
-
     }
 }
-

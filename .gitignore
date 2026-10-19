@@ -1,6 +1,3 @@
 Decisions.Zitac.AWS/bin/*
 Decisions.Zitac.AWS/obj/*
-AWSSDK.Core.dll
-AWSSDK.EC2.dll
-AWSSDK.SecurityToken.dll
 .vscode/settings.json

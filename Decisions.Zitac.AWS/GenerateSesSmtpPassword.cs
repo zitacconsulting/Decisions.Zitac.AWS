@@ -1,23 +1,26 @@
 using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Text;
-using DecisionsFramework.Design.Flow;
-using DecisionsFramework.Design.Properties;
+using Decisions.Zitac.AWS.Authentication;
+using DecisionsFramework;
 using DecisionsFramework.Design.ConfigurationStorage.Attributes;
-using DecisionsFramework.Design.Flow.Mapping;
+using DecisionsFramework.Design.Flow;
 using DecisionsFramework.Design.Flow.CoreSteps;
+using DecisionsFramework.Design.Flow.Mapping;
+using DecisionsFramework.Design.Properties;
+using DecisionsFramework.Design.Properties.Attributes;
 
 namespace Decisions.Zitac.AWS.Steps
 {
     [AutoRegisterStep("Generate SES SMTP Password", "Integration", "AWS", "Zitac")]
     [Writable]
-    public class GenerateSesSmtpPassword : BaseFlowAwareStep, ISyncStep, IDataConsumer, IDataProducer, INotifyPropertyChanged
+    public class GenerateSesSmtpPassword : BaseFlowAwareStep, ISyncStep, IDataConsumer, IDataProducer, INotifyPropertyChanged, IValidationSource
     {
         [WritableValue]
         private string region;
 
         [PropertyClassification(1, "AWS Region", "AWS Settings")]
-        [SelectStringEditor("RegionOptions")]
+        [SelectStringEditor(nameof(RegionOptions))]
         public string Region
         {
             get { return region; }
@@ -29,18 +32,21 @@ namespace Decisions.Zitac.AWS.Steps
         }
 
         [PropertyHidden]
-        public string[] RegionOptions
+        public string[] RegionOptions => AwsHelper.AllRegions;
+
+        [PropertyClassification(new[] { "Credentials" }, "SES SMTP Info", 0)]
+        [InfoOrWarningEditor(false, "https://docs.aws.amazon.com/ses/latest/dg/smtp-credentials.html", true)]
+        public string InputsNote
         {
-            get
-            {
-                return new string[]
-                {
-                    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-                    "eu-west-1", "eu-west-2", "eu-central-1",
-                    "ap-southeast-1", "ap-southeast-2", "ap-northeast-1", "ap-northeast-2",
-                    "sa-east-1"
-                };
-            }
+            get { return "Use the IAM user's Access Key ID as SMTP user and the result as password, on email-smtp.[region].amazonaws.com:587."; }
+            set { }
+        }
+
+        public ValidationIssue[] GetValidationIssues()
+        {
+            return string.IsNullOrEmpty(region)
+                ? new[] { new ValidationIssue(this, "Select the AWS Region of the SES endpoint you will send through", "", BreakLevel.Fatal, nameof(Region)) }
+                : Array.Empty<ValidationIssue>();
         }
 
         public DataDescription[] InputData
@@ -70,7 +76,7 @@ namespace Decisions.Zitac.AWS.Steps
         {
             try
             {
-                var secretAccessKey = data.Data["Secret Access Key"] as string;
+                var secretAccessKey = (data.Data["Secret Access Key"] as string)?.Trim();
 
                 if (string.IsNullOrEmpty(secretAccessKey))
                     throw new ArgumentException("Secret Access Key is required");
