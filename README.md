@@ -20,6 +20,7 @@
 - [Troubleshooting](#troubleshooting)
 - [Upgrading from 1.x](#upgrading-from-1x)
 - [Changelog](#changelog)
+- [License](#license)
 - [Disclaimer](#disclaimer)
 
 ## Features
@@ -385,6 +386,10 @@ Version 2.0 is not backward compatible with 1.x:
 
 ### 1.x
 - Execute AWS Rest Method, Upload File to S3 and Generate SES SMTP Password steps with per-step credentials
+
+## License
+
+This module is licensed under the [MIT License](LICENSE). Copyright (c) 2024-2026 Zitac Consulting AB.
 
 ## Disclaimer
 
