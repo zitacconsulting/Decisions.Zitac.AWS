@@ -4,6 +4,7 @@ using Serilog.Configuration;
 using Serilog.Core;
 using Serilog.Debugging;
 using Serilog.Events;
+using Serilog.Formatting;
 using Serilog.Formatting.Json;
 using Serilog.Sinks.PeriodicBatching;
 
@@ -36,7 +37,8 @@ namespace Decisions.Zitac.AWS.Logging
         {
             AWSCloudWatchLoggingSettings settings = SinkSettings;
             var groupResolver = new LogGroupResolver(settings.LogGroupPath, GetProcessName(), settings.RouteByProject);
-            var cloudWatchSink = new CloudWatchLogsBatchedSink(() => SinkSettings.GetConnection(), groupResolver, new JsonFormatter());
+            ITextFormatter formatter = settings.CompactLogFormat ? new CompactLogFormatter() : new JsonFormatter();
+            var cloudWatchSink = new CloudWatchLogsBatchedSink(() => SinkSettings.GetConnection(), groupResolver, formatter);
 
             ILogEventSink sink = new PeriodicBatchingSink(cloudWatchSink, new PeriodicBatchingSinkOptions
             {

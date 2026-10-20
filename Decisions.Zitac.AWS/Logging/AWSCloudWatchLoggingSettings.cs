@@ -28,8 +28,10 @@ namespace Decisions.Zitac.AWS.Logging
         private string externalId;
         private bool onlyLogSteps;
         private bool separateLogGroupPerProject;
+        private bool compactLogFormat = true;
 
         private const string ROUTING_CATEGORY = "Log Routing";
+        private const string FORMAT_CATEGORY = "Log Format";
 
         public override string Name => "Zitac AWS CloudWatch";
 
@@ -67,6 +69,27 @@ namespace Decisions.Zitac.AWS.Logging
             {
                 string prefix = LogGroupResolver.NormalizePath(LogGroupPath);
                 return $"Each project logs to its own group, e.g. {prefix}MyProject.";
+            }
+            set { }
+        }
+
+        [PropertyClassification(0, "Compact Log Format", FORMAT_CATEGORY)]
+        [DataMember]
+        public bool CompactLogFormat
+        {
+            get { return compactLogFormat; }
+            set { compactLogFormat = value; OnPropertyChanged(nameof(CompactLogFormat)); OnPropertyChanged(nameof(LogFormatHelp)); }
+        }
+
+        [PropertyClassification(1, "About Log Format", FORMAT_CATEGORY)]
+        [InfoOrWarningEditor(false, null, true)]
+        public string LogFormatHelp
+        {
+            get
+            {
+                return CompactLogFormat
+                    ? "Flat JSON with Level, Message, Category, Account, flow name and tracking ids. Server and session details are left out."
+                    : "Full Decisions JSON, including server, thread and session details.";
             }
             set { }
         }

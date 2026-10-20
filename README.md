@@ -227,6 +227,7 @@ Configured under **System > Settings > Logging Settings > Zitac AWS CloudWatch**
 | **Log Group Prefix** | Start of the log group names, without slashes. Default: `decisions`, giving groups like `/decisions/Decisions.Web.Core`. `company/prod` gives `/company/prod/...` |
 | **Use Separate AWS Connection for Logging** | Unticked: logs are sent with the system **Zitac AWS Settings**. Ticked: logging uses its own region, credentials and role, configured below it. |
 | **Only Send Entries From "Log" Steps** | Only messages written by **Log** steps in flows (Flow Management > Error Handling > Log) are sent. Decisions' own system logging is not sent. |
+| **Compact Log Format** | On by default. Each entry is flat JSON with only `Level`, `Message`, `Category`, `Account`, `FlowName`, `TopFlowTrackingId`, `FlowTrackingId` and `FlowId`, plus `Exception` when there is one and `Activity` for Error/Fatal entries. Off: Decisions' full JSON, with the fields nested under `Properties` and server, thread and session details. |
 | **One Log Group per Project** | Shown when the option above is ticked. Each project's messages go to their own log group named after the project, e.g. `/decisions/MyProject`. Messages from flows outside a project go to `/decisions/Decisions.Web.Core`. |
 
 ### Why one log group per project?
@@ -240,20 +241,27 @@ In CloudWatch, a log group is more than a folder:
 Log groups and log streams are created automatically. Each server writes its own log stream (`<hostname>_<start time>_<id>`), so clustered servers never mix their entries.
 
 ### Flow tracking fields
-Entries written from inside a running flow get three extra fields in CloudWatch (not in Decisions' own log file):
+Entries get extra context fields in CloudWatch (not in Decisions' own log file):
 
 | Field | Description |
 |-------|-------------|
-| `Properties.TopFlowTrackingId` | ID of the top-level flow execution. The same for the whole run, including synchronous subflows, so one execution can be followed across flows. |
-| `Properties.FlowTrackingId` | Full tracking ID of the flow or subflow that wrote the entry |
-| `Properties.FlowName` | Name of the flow that wrote the entry |
+| `Account` | Email address of the account the work runs as: the logged-in user, the named session's account, or `SYSTEM` for scheduled jobs. Note that this is personal data. |
+| `TopFlowTrackingId` | ID of the top-level flow execution. The same for the whole run, including synchronous subflows, so one execution can be followed across flows. |
+| `FlowTrackingId` | Full tracking ID of the flow or subflow that wrote the entry |
+| `FlowName` | Name of the flow that wrote the entry |
+
+The three flow fields are only added to entries written from inside a running flow.
+
+With **Compact Log Format** off, these and the other fields are nested under `Properties` (e.g. `Properties.FlowName`).
+
+> 💡 Decisions attaches the recent step history (`Activity`) to every **Error** and **Fatal** entry. For normal progress messages, use the **Info** level in your Log steps (and select Info in the sink's Levels) to keep entries short.
 
 Flows started asynchronously (e.g. "Run Flow Async") are separate executions with their own TopFlowTrackingId.
 
 ### Session IDs in logs (important)
 Decisions adds the user's session to every log entry as `Properties.SessionId`. **By default this is the real session ID**, which can be used to call Decisions as that user while the session is active. Anyone who can read the logs, now including everyone with access to the CloudWatch log groups, could use it.
 
-Turn on Decisions' **Obfuscate Session Id In Logs** setting on every server before sending logs to CloudWatch:
+With **Compact Log Format** on (the default), session IDs are not sent to CloudWatch at all. If you turn it off, or for Decisions' own log file, turn on Decisions' **Obfuscate Session Id In Logs** setting on every server:
 - `Settings.xml`: `<ObfuscateSessionIdInLogs>true</ObfuscateSessionIdInLogs>`
 - or, for containers, the environment variable `DECISIONS_OBFUSCATESESSIONIDINLOGS=true`
 
@@ -266,16 +274,17 @@ Restart Decisions afterwards. Decisions then logs a SHA-256 hash of the session 
 ### Searching logs
 Log entries are JSON. In **CloudWatch > Logs > Logs Insights**, every field can be shown as a column, filtered and sorted. For example, all entries of one execution:
 ```
-fields @timestamp, Level, Properties.FlowName as Flow, MessageTemplate as Message, Properties.Category as Category
-| filter Properties.TopFlowTrackingId = "PASTE-TRACKING-ID"
+fields @timestamp, Level, FlowName, Message, Category, Account
+| filter TopFlowTrackingId = "PASTE-TRACKING-ID"
 | sort @timestamp asc
 ```
 Recent errors:
 ```
-fields @timestamp, Properties.FlowName as Flow, MessageTemplate as Message
+fields @timestamp, FlowName, Message
 | filter Level = "Error"
 | sort @timestamp desc
 ```
+With Compact Log Format off, use `Properties.FlowName`, `Properties.Category`, `MessageTemplate` and so on instead.
 
 ### Behavior when something is wrong
 - Logs are sent in the background every 10 seconds, so flows never wait for CloudWatch.
@@ -377,7 +386,7 @@ Version 2.0 is not backward compatible with 1.x:
 - Assume Role support (External ID, session name, session duration) with cached, auto-refreshed credentials
 - **Test AWS Connection** action
 - New **Get CloudWatch Log Events** step with filter pattern, time range and paging
-- CloudWatch logging merged into this module, rewritten to call CloudWatch Logs directly; options for "Log"-step-only logging and one log group per project; entries from flows carry TopFlowTrackingId, FlowTrackingId and FlowName
+- CloudWatch logging merged into this module, rewritten to call CloudWatch Logs directly; options for "Log"-step-only logging and one log group per project; Compact Log Format (default); entries carry Account, and entries from flows TopFlowTrackingId, FlowTrackingId and FlowName
 - Upload File to S3: fixed authentication with Access Keys; content type detected from the file name when not given; added Content Type, ETag and Version Id outputs
 - Execute AWS Rest Method: fixed request signing for query strings, special characters and non-S3 services; added Headers input, Endpoint URL Override, Content Type, Timeout and Status Code; Request Body (JSON) renamed to Request Body
 - Region lists now include every AWS region
