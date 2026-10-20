@@ -49,6 +49,12 @@ namespace Decisions.Zitac.AWS.Logging
         private string connectionFingerprint;
         private readonly HashSet<string> readyGroups = new HashSet<string>(StringComparer.Ordinal);
 
+        // Creation time (epoch ms) of log groups this sink created. Logs Insights / Log Analytics don't return
+        // events timestamped before their log group's creation time (the group's own search still does). A group
+        // is created when its first batch is sent, up to a batch period after those events were written, so that
+        // first batch would be invisible to queries: its older events are moved up to the creation time.
+        private readonly Dictionary<string, long> groupCreationTimes = new Dictionary<string, long>(StringComparer.Ordinal);
+
         public CloudWatchLogsBatchedSink(Func<AwsConnection> getConnection, LogGroupResolver groupResolver, ITextFormatter formatter)
         {
             this.getConnection = getConnection;
@@ -68,6 +74,7 @@ namespace Decisions.Zitac.AWS.Logging
                 credentials = connection.GetCredentials();
                 connectionFingerprint = fingerprint;
                 readyGroups.Clear();
+                groupCreationTimes.Clear();
             }
 
             var byGroup = batch
@@ -105,7 +112,7 @@ namespace Decisions.Zitac.AWS.Logging
                 readyGroups.Add(logGroupName);
             }
 
-            foreach (var chunk in SplitIntoPuts(events))
+            foreach (var chunk in SplitIntoPuts(NotBeforeGroupCreation(logGroupName, events)))
             {
                 try
                 {
@@ -115,9 +122,41 @@ namespace Decisions.Zitac.AWS.Logging
                 {
                     // Group or stream deleted while running: recreate and retry once.
                     await EnsureGroupAndStreamAsync(connection, logGroupName).ConfigureAwait(false);
-                    await PutLogEventsAsync(connection, logGroupName, chunk).ConfigureAwait(false);
+                    await PutLogEventsAsync(connection, logGroupName, NotBeforeGroupCreation(logGroupName, chunk)).ConfigureAwait(false);
                 }
             }
+        }
+
+        /// <summary>Exact creation time from DescribeLogGroups; without that permission, this server's clock plus a margin.</summary>
+        private async Task<long> GetCreationTimeAsync(AwsConnection connection, string logGroupName)
+        {
+            try
+            {
+                string response = await CloudWatchLogsApi.CallAsync(connection, credentials, "DescribeLogGroups",
+                    new { logGroupNamePrefix = logGroupName, limit = 50 }).ConfigureAwait(false);
+                using JsonDocument doc = JsonDocument.Parse(response);
+                if (doc.RootElement.TryGetProperty("logGroups", out JsonElement groups))
+                {
+                    foreach (JsonElement group in groups.EnumerateArray())
+                    {
+                        if (group.TryGetProperty("logGroupName", out JsonElement name) && name.GetString() == logGroupName
+                            && group.TryGetProperty("creationTime", out JsonElement created))
+                            return created.GetInt64();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                SelfLog.WriteLine("Zitac AWS CloudWatch: could not read creation time of {0} (needs logs:DescribeLogGroups): {1}", logGroupName, ex.Message);
+            }
+            return DateTimeOffset.UtcNow.AddSeconds(2).ToUnixTimeMilliseconds();
+        }
+
+        private List<(long Timestamp, string Message)> NotBeforeGroupCreation(string logGroupName, List<(long Timestamp, string Message)> events)
+        {
+            if (!groupCreationTimes.TryGetValue(logGroupName, out long createdAt))
+                return events;
+            return events.Select(e => e.Timestamp < createdAt ? (createdAt, e.Message) : e).ToList();
         }
 
         public Task OnEmptyBatchAsync()
@@ -131,6 +170,7 @@ namespace Decisions.Zitac.AWS.Logging
             try
             {
                 await CallAsync(connection, "CreateLogGroup", new { logGroupName }).ConfigureAwait(false);
+                groupCreationTimes[logGroupName] = await GetCreationTimeAsync(connection, logGroupName).ConfigureAwait(false);
             }
             catch (CloudWatchLogsException ex) when (ex.ErrorType == "ResourceAlreadyExistsException" || ex.ErrorType == "AccessDeniedException")
             {

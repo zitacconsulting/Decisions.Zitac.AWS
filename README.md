@@ -44,6 +44,7 @@
 - Optionally send only messages from **"Log"** steps in your flows
 - Optionally use **one log group per project**, so each project can be monitored, secured and retained separately
 - Settings changes take effect when you save, without restarting Decisions
+- The first entries of a new log group are kept visible to Logs Insights / Log Analytics
 - A logging problem never stops Decisions from starting or slows down flows
 
 ## Requirements
@@ -290,6 +291,7 @@ With Compact Log Format off, use `Properties.FlowName`, `Properties.Category`, `
 - Logs are sent in the background every 10 seconds, so flows never wait for CloudWatch.
 - If sending fails (wrong credentials, no network), the sink retries with increasing delays (5 seconds up to 10 minutes). After repeated failures the oldest entries are dropped. At most 10,000 entries are kept in memory.
 - A logging problem never stops Decisions from starting.
+- **New log groups:** Logs Insights / Log Analytics don't return events timestamped before their log group was created (the log group's own search does). A log group is created when its first entries are sent, a few seconds after they were written, so the module moves the timestamps of those first entries up to the group's creation time (a shift of at most a few seconds, once per new group). It reads the exact creation time with `logs:DescribeLogGroups`; without that permission it uses the server's clock plus two seconds.
 
 > ℹ️ This sink replaces the built-in **AWS CloudWatch** sink of the Decisions.AWS module. In Decisions 9.26–9.32 the built-in sink most likely cannot send any logs: Decisions.AWS ships an AWS SDK CloudWatch library (3.7) that is incompatible with the AWS SDK core (4.x) shipped with Decisions. This module talks to CloudWatch directly and doesn't depend on that library.
 
@@ -310,7 +312,7 @@ Grant only what you use. Example policy for an IAM user or role:
     {
       "Sid": "CloudWatchLogging",
       "Effect": "Allow",
-      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:FilterLogEvents"],
+      "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents", "logs:FilterLogEvents", "logs:DescribeLogGroups"],
       "Resource": [
         "arn:aws:logs:*:*:log-group:/decisions/*",
         "arn:aws:logs:*:*:log-group:/decisions/*:*"
@@ -325,7 +327,7 @@ Grant only what you use. Example policy for an IAM user or role:
 | Test AWS Connection | None (`sts:GetCallerIdentity` is always allowed) |
 | Upload File to S3 | `s3:PutObject` on the bucket |
 | Execute AWS Rest Method | Whatever the called API requires |
-| CloudWatch Logging | `logs:CreateLogStream`, `logs:PutLogEvents`, and `logs:CreateLogGroup` unless the groups are created in advance |
+| CloudWatch Logging | `logs:CreateLogStream`, `logs:PutLogEvents`, and `logs:CreateLogGroup` unless the groups are created in advance. `logs:DescribeLogGroups` is recommended (see [Behavior when something is wrong](#behavior-when-something-is-wrong)) |
 | Get CloudWatch Log Events | `logs:FilterLogEvents` on the log group |
 | Assume Role | `sts:AssumeRole` on the role for the calling identity, and a trust policy on the role that allows that identity (with the External ID, if used) |
 
